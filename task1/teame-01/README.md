@@ -33,9 +33,19 @@ To execute the http benchmark run:
 This benchmark retrieves the front page and measures the requests per second. 
 
 
+To run the benchmark and generate plot from the result run:
+```
+./gen_plots.sh
+```
+
+
 ## Full System profiling 
 
 Unfortunately we didn't get full system profiling to work in time.
 
 
 # Plots 
+
+![homepage plot](./plot.png)
+
+
