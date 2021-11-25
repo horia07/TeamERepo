@@ -26,9 +26,8 @@ you can find all the  generated results in ./results:
 - data-18080.txt  		basic benchmark results	
 - data-18081.txt		epoll benchmark results
 - plot-[timestamp].png 		plot generated at [timestamp]
-- plot-review.png		plot shown in review and this README
 
 
 # Plot
 
-![homepage plot](./result/plot-review.png)
+![homepage plot](./plot-review.png)
