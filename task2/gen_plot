@@ -1,0 +1,2 @@
+docker build -t teame/task2-plot -f Dockerfile.plot .
+docker run --rm -it -v ${PWD}/result:/data teame/task2-plot

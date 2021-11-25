@@ -1,0 +1,12 @@
+
+echo [*] starup services
+docker-compose up --build -d --remove-orphans
+
+echo "[*] run benchmarks (takes approx. 200s)"
+./benchmark
+
+echo [*] creating plots
+./gen_plot
+
+echo [*] stop services
+docker-compose down

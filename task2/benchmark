@@ -1,0 +1,27 @@
+clients=(10 100 1000 5000 10000 15000 20000 25000)
+duration=10s
+threads=10
+base_url="http://192.168.55.1"
+base_path="./result"
+
+mkdir -p $base_path
+
+conn_file=$base_path/connections.txt
+echo -n "" > $conn_file
+for c in "${clients[@]}"
+do
+    echo $c >> $conn_file
+done
+
+for port in 18080 18081
+do
+    url=$base_url":"$port
+    file=$base_path/data-$port.txt
+    echo $url
+    echo -n "" > $file
+    for c in "${clients[@]}"
+    do
+	echo measuring reqs/sec for $url clients= $c threads= $threads duration= $duration 
+        docker run --rm --network host --rm williamyeh/wrk -c $c -d $duration -t $threads $url | grep Requests\/sec: | awk '{print $2}' | tee -a $file
+    done
+done
