@@ -1,3 +1,5 @@
+use std::mem;
+
 pub fn fill_random(buf: &mut [u8]) {
     unsafe {
         libc::getrandom(buf.as_mut_ptr() as _, buf.len(), 0);
@@ -15,4 +17,18 @@ pub unsafe fn setsockopt<T>(fd: i32, opt: libc::c_int, val: T) -> i32 {
     );
 
     return res;
+}
+
+pub unsafe fn getsockopt<T>(fd: i32, opt: libc::c_int) -> T {
+    let mut val: mem::MaybeUninit<T> = mem::MaybeUninit::uninit();
+    let mut len = mem::size_of::<T>() as libc::socklen_t;
+    libc::getsockopt(
+        fd,
+        libc::IPPROTO_TCP,
+        opt,
+        val.as_mut_ptr().cast(),
+        &mut len,
+    );
+
+    return val.assume_init();
 }

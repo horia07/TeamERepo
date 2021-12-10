@@ -5,15 +5,15 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 pub struct ServerOpts {
     /// server port of control channel
-    #[structopt(default_value = "5202")]
+    #[structopt(short, long, default_value = "5202")]
     pub port: u16,
 
     /// server port of data channel (random if unassigned)
-    #[structopt(default_value = "0")]
+    #[structopt(long, default_value = "0")]
     pub data_port: u16,
 
     /// bind to interface address
-    #[structopt(long, default_value = "0.0.0.0")]
+    #[structopt(short, long, default_value = "0.0.0.0")]
     pub bind: IpAddr,
 
     /// accept only a single client
@@ -27,29 +27,37 @@ pub struct ServerOpts {
 
 #[derive(Debug, StructOpt)]
 pub struct ClientOpts {
-    /// host
+    /// Print output as JSON
+    #[structopt(short, long)]
+    pub json: bool,
+
+    /// Host to connect to
     pub host: IpAddr,
 
-    /// server port
-    #[structopt(default_value = "5202")]
+    /// Server port
+    #[structopt(short, long, default_value = "5202")]
     pub port: u16,
 
-    /// server sends data to clients
+    /// Server sends data to client
     #[structopt(short = "R", long)]
     pub reversed: bool,
 
-    /// time to run the benchmark
+    /// Time to run the benchmark (in seconds)
     #[structopt(short, long)]
     pub time: u64,
 
-    /// network interface to bind to (eg. eth0)
-    /// normally appended with a % to the end of the ip6 but rust does not support this.
-    #[structopt(long)]
-    pub bind_dev: Option<String>,
+    /// Network interface to bind to (eg. eth0)
+    /// normally appended with a % to the end of the ip6 but Rust does not support that
+    #[structopt(short, long)]
+    pub interface: Option<String>,
 
-    /// maximum segment size
+    /// Maximum segment size
     #[structopt(short = "M", long)]
     pub mss: Option<i32>,
+
+    /// Tcp buffer size
+    #[structopt(long, default_value = "4096")]
+    pub buffer_size: usize,
 }
 
 #[derive(Debug, StructOpt)]
@@ -64,6 +72,7 @@ pub struct ClientHello {
     pub time: u64,
     pub mss: Option<i32>,
     pub reversed: bool,
+    pub buffer_size: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]

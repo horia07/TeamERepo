@@ -15,8 +15,6 @@ use error::Error;
 
 mod util;
 
-const BUF_SIZE: usize = 4096;
-
 fn main() {
     let opt = Opt::from_args();
     match opt {
@@ -34,13 +32,24 @@ fn print_status(bytes_written: usize, interval: u64, id: usize) {
     );
 }
 
+fn print_summary(bytes_written: usize, time: u64) {
+    let transfer = bytesize::to_string(bytes_written as u64, false);
+    let bandwidth = bytesize::to_string((bytes_written * 8) as u64 / time, false);
+
+    println!("-------");
+    println!(
+        "[*] transfer= {}, bandwidth= {}it/sec\n",
+        transfer, bandwidth
+    );
+}
+
 /// startup the server
 fn client(opts: ClientOpts) -> Result<(), Error> {
     let mut addr = SocketAddr::new(opts.host, opts.port);
 
     match &mut addr {
         SocketAddr::V6(addr6) => {
-            if let Some(bind_dev) = &opts.bind_dev {
+            if let Some(bind_dev) = &opts.interface {
                 let if_name = CString::new(bind_dev.as_str()).unwrap();
                 let if_index = unsafe { libc::if_nametoindex(if_name.as_ptr() as _) };
                 addr6.set_scope_id(if_index);
@@ -53,12 +62,13 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
     let mut control_stream = TcpStream::connect(addr).unwrap();
 
     // send client hello to control stream;
-    let hello = ClientHello {
+    let client_hello = ClientHello {
         time: opts.time,
         reversed: opts.reversed,
         mss: opts.mss,
+        buffer_size: opts.buffer_size,
     };
-    let control = ControlMessage::ClientHello(hello.clone());
+    let control = ControlMessage::ClientHello(client_hello.clone());
     control_stream.write(&bincode::serialize(&control)?)?;
 
     let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
@@ -71,9 +81,9 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
             let mut data_stream =
                 unsafe { create_client_socket((opts.host, server_hello.data_port).into(), &opts)? };
             if opts.reversed {
-                receiver(&mut data_stream, hello.time)?;
+                receiver(&mut data_stream, client_hello)?;
             } else {
-                sender(&mut data_stream, hello.time)?;
+                sender(&mut data_stream, client_hello)?;
             }
         }
         _ => return Err(Error::Protocol("unexpected control message")),
@@ -108,13 +118,13 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
 
         let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
 
-        let hello = match control {
+        let client_hello = match control {
             ControlMessage::ClientHello(hello) => hello,
             _ => return Err(Error::Protocol("unexpected control message")),
         };
         println!(
-            "received client configuration: time= {} reversed= {}",
-            hello.time, hello.reversed
+            "received client configuration= {}",
+            serde_json::to_string(&client_hello).unwrap()
         );
 
         // create data stream with random port
@@ -135,10 +145,10 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
         let (mut data_stream, _client_addr) = data_socket.accept()?;
         // TODO: maybe check if client address is the same as before
 
-        if hello.reversed {
-            sender(&mut data_stream, hello.time)?;
+        if client_hello.reversed {
+            sender(&mut data_stream, client_hello)?;
         } else {
-            receiver(&mut data_stream, hello.time)?;
+            receiver(&mut data_stream, client_hello)?;
         }
 
         if opts.single {
@@ -150,16 +160,16 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
 
 /// use the given socket as the sender
 /// only write to the socket
-fn sender<S>(stream: &mut S, time: u64) -> Result<(), io::Error>
+fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
 where
     S: Write,
 {
     let start = Instant::now();
     let mut before = 0;
 
-    let mut buf = [0; BUF_SIZE];
+    let mut buf = vec![0; client_hello.buffer_size];
     util::fill_random(&mut buf);
-    let mut written: Vec<usize> = vec![0; time as usize];
+    let mut written: Vec<usize> = vec![0; client_hello.time as usize];
 
     loop {
         let elapsed = start.elapsed().as_secs();
@@ -171,7 +181,7 @@ where
             before = segment;
         }
 
-        if start.elapsed().as_secs() >= time {
+        if start.elapsed().as_secs() >= client_hello.time {
             break;
         }
 
@@ -179,28 +189,21 @@ where
         *written.get_mut(segment).unwrap() += n;
     }
 
-    let total_time = start.elapsed();
-
-    let total_written: usize = written.iter().sum();
-    let transfer = bytesize::to_string(total_written as u64, false);
-    let bandwidth = bytesize::to_string((total_written * 8) as u64 / total_time.as_secs(), false);
-
-    println!("-------");
-    println!("[*] transfer= {}, bandwidth= {}it/sec", transfer, bandwidth);
+    print_summary(written.iter().sum(), start.elapsed().as_secs());
     Ok(())
 }
 
 /// use the given socket as the receiver
 /// only read from the socket
-fn receiver<S>(socket: &mut S, time: u64) -> Result<(), io::Error>
+fn receiver<S>(socket: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
 where
     S: Read,
 {
     let start = Instant::now();
     let mut before = 0;
 
-    let mut buf = [0; BUF_SIZE];
-    let mut written: Vec<usize> = vec![0; time as usize];
+    let mut buf = vec![0; client_hello.buffer_size];
+    let mut written: Vec<usize> = vec![0; client_hello.time as usize];
 
     loop {
         let segment = start.elapsed().as_secs() as usize;
@@ -217,14 +220,7 @@ where
         }
     }
 
-    let total_time = start.elapsed();
-
-    let total_written: usize = written.iter().sum();
-    let transfer = bytesize::to_string(total_written as u64, false);
-    let bandwidth = bytesize::to_string((total_written * 8) as u64 / total_time.as_secs(), false);
-
-    println!("-------");
-    println!("[*] transfer= {}, bandwidth= {}it/sec", transfer, bandwidth);
+    print_summary(written.iter().sum(), start.elapsed().as_secs());
     Ok(())
 }
 
