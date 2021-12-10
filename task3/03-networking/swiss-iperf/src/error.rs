@@ -4,6 +4,7 @@ use std::{convert::From, io};
 pub enum Error {
     Io(io::Error),
     Bincode(bincode::Error),
+    Protocol(&'static str),
 }
 
 impl From<io::Error> for Error {

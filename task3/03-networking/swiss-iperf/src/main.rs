@@ -18,9 +18,6 @@ mod util;
 const BUF_SIZE: usize = 4096;
 
 fn main() {
-    let s = TcpListener::bind("0.0.0.0:0").unwrap();
-    dbg!(s.local_addr());
-
     let opt = Opt::from_args();
     match opt {
         Opt::Server(server_opts) => server(server_opts).unwrap(),
@@ -52,31 +49,34 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
         _ => {}
     }
 
-    // let mut stream = TcpStream::connect(addr).unwrap();
-    let mut stream = unsafe { create_client_socket(addr, &opts)? };
+    // create the control stream
+    let mut control_stream = TcpStream::connect(addr).unwrap();
 
-    if let Ok(addr) = stream.local_addr() {
-        dbg!(addr);
-    }
-
+    // send client hello to control stream;
     let hello = ClientHello {
         time: opts.time,
         reversed: opts.reversed,
         mss: opts.mss,
     };
     let control = ControlMessage::ClientHello(hello.clone());
+    control_stream.write(&bincode::serialize(&control)?)?;
 
-    bincode::serialize_into(&mut stream, &control).unwrap();
-    let control: ControlMessage = bincode::deserialize_from(&mut stream).unwrap();
-
-    if control != ControlMessage::ServerHello {
-        panic!("wrong control message");
-    }
-
-    if opts.reversed {
-        receiver(&mut stream, hello.time)?;
-    } else {
-        sender(&mut stream, hello.time)?;
+    let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
+    match control {
+        ControlMessage::ServerHello(server_hello) => {
+            println!(
+                "received server hello: data_port= {}",
+                server_hello.data_port
+            );
+            let mut data_stream =
+                unsafe { create_client_socket((opts.host, server_hello.data_port).into(), &opts)? };
+            if opts.reversed {
+                receiver(&mut data_stream, hello.time)?;
+            } else {
+                sender(&mut data_stream, hello.time)?;
+            }
+        }
+        _ => return Err(Error::Protocol("unexpected control message")),
     }
 
     Ok(())
@@ -102,27 +102,43 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
     println!("Server listening on {}:{}", addr.ip(), addr.port());
 
     loop {
-        let (mut stream, addr) = listener.accept()?;
+        let (mut control_stream, client_addr) = listener.accept()?;
 
-        println!("new connection from: {:?}", addr);
+        println!("new connection from: {:?}", client_addr);
 
-        let control: ControlMessage = bincode::deserialize_from(&mut stream).unwrap();
+        let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
 
         let hello = match control {
             ControlMessage::ClientHello(hello) => hello,
-            _ => panic!("wrong control message"),
+            _ => return Err(Error::Protocol("unexpected control message")),
         };
         println!(
             "received client configuration: time= {} reversed= {}",
             hello.time, hello.reversed
         );
 
-        bincode::serialize_into(&mut stream, &ControlMessage::ServerHello)?;
+        // create data stream with random port
+        let data_addr = {
+            let mut tmp = addr.clone();
+            tmp.set_port(opts.data_port);
+            tmp
+        };
+        let data_socket = TcpListener::bind(data_addr)?;
+
+        // send server hello containing socket address of data socket message to client
+        let server_hello = ServerHello {
+            data_port: data_socket.local_addr()?.port(),
+        };
+        let control = ControlMessage::ServerHello(server_hello);
+        control_stream.write(&bincode::serialize(&control)?)?;
+
+        let (mut data_stream, _client_addr) = data_socket.accept()?;
+        // TODO: maybe check if client address is the same as before
 
         if hello.reversed {
-            sender(&mut stream, hello.time)?;
+            sender(&mut data_stream, hello.time)?;
         } else {
-            receiver(&mut stream, hello.time)?;
+            receiver(&mut data_stream, hello.time)?;
         }
 
         if opts.single {

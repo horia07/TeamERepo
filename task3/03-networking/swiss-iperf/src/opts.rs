@@ -4,9 +4,13 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 pub struct ServerOpts {
-    /// server port
+    /// server port of control channel
     #[structopt(default_value = "5202")]
     pub port: u16,
+
+    /// server port of data channel (random if unassigned)
+    #[structopt(default_value = "0")]
+    pub data_port: u16,
 
     /// bind to interface address
     #[structopt(long, default_value = "0.0.0.0")]
@@ -62,8 +66,13 @@ pub struct ClientHello {
     pub reversed: bool,
 }
 
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+pub struct ServerHello {
+    pub data_port: u16,
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum ControlMessage {
     ClientHello(ClientHello),
-    ServerHello,
+    ServerHello(ServerHello),
 }
