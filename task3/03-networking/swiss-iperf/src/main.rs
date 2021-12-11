@@ -27,24 +27,38 @@ fn main() {
     }
 }
 
-fn print_status(bytes_written: usize, interval: u64, id: usize) {
+fn print_status(bytes_written: usize, interval: u64, id: usize, retransmits: Option<u32>) {
     let transfer = bytesize::to_string(bytes_written as u64, false);
     let bandwidth = bytesize::to_string((bytes_written * 8) as u64 / interval, false);
-    println!(
-        "[{}] transfer= {} bandwidth= {}it/sec",
-        id, transfer, bandwidth
-    );
+    if let Some(retrans) = retransmits {
+        println!(
+            "[{:>3}] transfer= {} bandwidth= {}it/sec retransmits= {}",
+            id, transfer, bandwidth, retrans
+        );
+    } else {
+        println!(
+            "[{:>3}] transfer= {} bandwidth= {}it/sec",
+            id, transfer, bandwidth
+        );
+    }
 }
 
-fn print_summary(bytes_written: usize, time: u64) {
+fn print_summary(bytes_written: usize, time: u64, retransmits: Option<u32>) {
     let transfer = bytesize::to_string(bytes_written as u64, false);
     let bandwidth = bytesize::to_string((bytes_written * 8) as u64 / time, false);
 
     println!("-------");
-    println!(
-        "[*] transfer= {}, bandwidth= {}it/sec\n",
-        transfer, bandwidth
-    );
+    if let Some(retrans) = retransmits {
+        println!(
+            "[SUM] transfer= {} bandwidth= {}it/sec retransmits= {}\n",
+            transfer, bandwidth, retrans
+        );
+    } else {
+        println!(
+            "[*] transfer= {} bandwidth= {}it/sec\n",
+            transfer, bandwidth
+        );
+    }
 }
 
 /// startup the server
@@ -174,6 +188,7 @@ where
 {
     let start = Instant::now();
     let mut before = 0;
+    let mut total_retransmits = 0;
 
     let mut buf = vec![0; client_hello.buffer_size];
     util::fill_random(&mut buf);
@@ -187,12 +202,10 @@ where
             let tcp_info: bindings::tcp_info =
                 unsafe { util::getsockopt(stream.as_raw_fd(), libc::IPPROTO_TCP, libc::TCP_INFO)? };
 
-            println!(
-                "retransmits= {} retrans= {} lost= {}",
-                tcp_info.tcpi_retransmits, tcp_info.tcpi_retrans, tcp_info.tcpi_lost
-            );
+            let current_retransmits = tcp_info.tcpi_total_retrans - total_retransmits;
+            total_retransmits = tcp_info.tcpi_total_retrans;
 
-            print_status(written[segment - 1], 1, segment);
+            print_status(written[segment - 1], 1, segment, Some(current_retransmits));
             before = segment;
         }
 
@@ -204,7 +217,11 @@ where
         *written.get_mut(segment).unwrap() += n;
     }
 
-    print_summary(written.iter().sum(), start.elapsed().as_secs());
+    print_summary(
+        written.iter().sum(),
+        start.elapsed().as_secs(),
+        Some(total_retransmits),
+    );
     Ok(())
 }
 
@@ -223,7 +240,7 @@ where
     loop {
         let segment = start.elapsed().as_secs() as usize;
         if before != segment {
-            print_status(written[segment - 1], 1, segment);
+            print_status(written[segment - 1], 1, segment, None);
             before = segment;
         }
 
@@ -235,7 +252,7 @@ where
         }
     }
 
-    print_summary(written.iter().sum(), start.elapsed().as_secs());
+    print_summary(written.iter().sum(), start.elapsed().as_secs(), None);
     Ok(())
 }
 
