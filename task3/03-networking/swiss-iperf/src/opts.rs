@@ -47,7 +47,7 @@ pub struct ClientOpts {
     pub time: u64,
 
     /// Network interface to bind to (eg. eth0)
-    /// normally appended with a % to the end of the ip6 but Rust does not support that
+    /// usually appended with a % to the end of the ip6 but Rust does not support that
     #[structopt(short, long)]
     pub interface: Option<String>,
 
@@ -63,7 +63,9 @@ pub struct ClientOpts {
 #[derive(Debug, StructOpt)]
 #[structopt(name = "swiss-iperf", about = "An iperf clone")]
 pub enum Opt {
+    #[structopt(alias("s"))]
     Server(ServerOpts),
+    #[structopt(alias("c"))]
     Client(ClientOpts),
 }
 

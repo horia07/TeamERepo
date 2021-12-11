@@ -78,8 +78,12 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
                 "received server hello: data_port= {}",
                 server_hello.data_port
             );
-            let mut data_stream =
-                unsafe { create_client_socket((opts.host, server_hello.data_port).into(), &opts)? };
+            let data_addr = {
+                let mut tmp = addr.clone();
+                tmp.set_port(server_hello.data_port);
+                tmp
+            };
+            let mut data_stream = unsafe { create_client_socket(data_addr, &opts)? };
             if opts.reversed {
                 receiver(&mut data_stream, client_hello)?;
             } else {
