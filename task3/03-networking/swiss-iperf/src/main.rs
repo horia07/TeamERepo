@@ -3,6 +3,7 @@ use std::{
     io::{self, Read, Write},
     mem,
     net::{SocketAddr, TcpListener, TcpStream},
+    os::unix::io::FromRawFd,
     time::Instant,
 };
 use structopt::StructOpt;
@@ -14,6 +15,9 @@ mod error;
 use error::Error;
 
 mod util;
+use util::wrap_io_err;
+
+mod bindings;
 
 fn main() {
     let opt = Opt::from_args();
@@ -83,7 +87,7 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
                 tmp.set_port(server_hello.data_port);
                 tmp
             };
-            let mut data_stream = unsafe { create_client_socket(data_addr, &opts)? };
+            let mut data_stream = create_client_socket(data_addr, &client_hello)?;
             if opts.reversed {
                 receiver(&mut data_stream, client_hello)?;
             } else {
@@ -137,7 +141,7 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
             tmp.set_port(opts.data_port);
             tmp
         };
-        let data_socket = TcpListener::bind(data_addr)?;
+        let data_socket = create_server_socket(data_addr, &client_hello)?;
 
         // send server hello containing socket address of data socket message to client
         let server_hello = ServerHello {
@@ -166,7 +170,7 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
 /// only write to the socket
 fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
 where
-    S: Write,
+    S: Write + std::os::unix::io::AsRawFd,
 {
     let start = Instant::now();
     let mut before = 0;
@@ -180,8 +184,15 @@ where
         let segment = elapsed as usize;
 
         if before != segment {
-            print_status(written[segment - 1], 1, segment);
+            let tcp_info: bindings::tcp_info =
+                unsafe { util::getsockopt(stream.as_raw_fd(), libc::IPPROTO_TCP, libc::TCP_INFO)? };
 
+            println!(
+                "retransmits= {} retrans= {} lost= {}",
+                tcp_info.tcpi_retransmits, tcp_info.tcpi_retrans, tcp_info.tcpi_lost
+            );
+
+            print_status(written[segment - 1], 1, segment);
             before = segment;
         }
 
@@ -228,28 +239,63 @@ where
     Ok(())
 }
 
-/// create a client socket from a raw fd
-/// this is used to set socket options before connecting
-unsafe fn create_client_socket(
-    addr: SocketAddr,
-    opts: &ClientOpts,
-) -> Result<TcpStream, io::Error> {
+unsafe fn create_raw_socket(addr: SocketAddr, opts: &ClientHello) -> Result<i32, io::Error> {
     let fam = match addr {
         SocketAddr::V4(_) => libc::AF_INET,
         SocketAddr::V6(_) => libc::AF_INET6,
     };
 
-    let fd = libc::socket(fam, libc::SOCK_STREAM, 0);
+    let fd = wrap_io_err(libc::socket(fam, libc::SOCK_STREAM, 0))?;
 
     // set the maximum segment size for this socket
     if let Some(mss) = opts.mss {
-        let res = util::setsockopt(fd, libc::TCP_MAXSEG, mss);
-        assert_eq!(0, res, "could not set mss");
+        wrap_io_err(util::setsockopt(
+            fd,
+            libc::IPPROTO_TCP,
+            libc::TCP_MAXSEG,
+            mss,
+        ))?;
     }
 
-    // shamelessly stolen from the rust private std lib
-    // (they could have just made the module public)
-    let (addrp, len) = match addr {
+    Ok(fd)
+}
+
+/// create a client socket from a raw fd
+/// this is used to set socket options before connecting
+fn create_client_socket(addr: SocketAddr, opts: &ClientHello) -> Result<TcpStream, io::Error> {
+    let fd = unsafe { create_raw_socket(addr, opts)? };
+
+    let (addrp, len) = unsafe { addr_into_inner(&addr) };
+
+    wrap_io_err(unsafe { libc::connect(fd, addrp, len) })?;
+
+    Ok(unsafe { TcpStream::from_raw_fd(fd) })
+}
+
+/// create a server socket from a raw fd
+/// this is used to set socket options before connecting
+fn create_server_socket(addr: SocketAddr, opts: &ClientHello) -> Result<TcpListener, io::Error> {
+    let fd = unsafe { create_raw_socket(addr, opts)? };
+
+    // SAFETY: addr lives for the whole function
+    let (addrp, len) = unsafe { addr_into_inner(&addr) };
+
+    wrap_io_err(unsafe {
+        util::setsockopt(fd, libc::SOL_SOCKET, libc::SO_REUSEADDR, 1 as libc::c_int)
+    })?;
+
+    wrap_io_err(unsafe { libc::bind(fd, addrp, len as _) }).unwrap();
+    wrap_io_err(unsafe { libc::listen(fd, 128) })?;
+
+    Ok(unsafe { TcpListener::from_raw_fd(fd) })
+}
+
+/// shamelessly stolen from the rust private std lib
+/// (they could have just made the module public)
+///
+/// SAFETY: addr has to live longe than the function!!
+unsafe fn addr_into_inner(addr: &SocketAddr) -> (*const libc::sockaddr, libc::socklen_t) {
+    match addr {
         SocketAddr::V4(ref a) => (
             a as *const _ as *const _,
             mem::size_of_val(a) as libc::socklen_t,
@@ -258,10 +304,5 @@ unsafe fn create_client_socket(
             a as *const _ as *const _,
             mem::size_of_val(a) as libc::socklen_t,
         ),
-    };
-
-    libc::connect(fd, addrp, len);
-
-    use std::os::unix::io::FromRawFd;
-    Ok(TcpStream::from_raw_fd(fd))
+    }
 }

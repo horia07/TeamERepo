@@ -56,7 +56,7 @@ pub struct ClientOpts {
     pub mss: Option<i32>,
 
     /// Tcp buffer size
-    #[structopt(long, default_value = "4096")]
+    #[structopt(long, default_value = "32768")]
     pub buffer_size: usize,
 }
 
