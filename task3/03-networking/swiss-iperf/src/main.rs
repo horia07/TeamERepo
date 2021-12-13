@@ -1,12 +1,15 @@
 use std::{
     ffi::CString,
-    io::{self, Read, Write},
+    fs::File,
+    io::{self, Read, Seek, Write},
     mem,
     net::{SocketAddr, TcpListener, TcpStream},
-    os::unix::io::FromRawFd,
+    os::unix::io::{AsRawFd, FromRawFd},
     time::Instant,
 };
 use structopt::StructOpt;
+
+const TCP_BLOCKSIZE: usize = 128 * 1024;
 
 mod opts;
 use opts::*;
@@ -27,7 +30,17 @@ fn main() {
     }
 }
 
-fn print_status(bytes_written: usize, interval: u64, id: usize, retransmits: Option<u32>) {
+fn print_status(
+    json: bool,
+    bytes_written: usize,
+    interval: u64,
+    id: usize,
+    retransmits: Option<u32>,
+) {
+    if json {
+        return;
+    }
+
     let transfer = bytesize::to_string(bytes_written as u64, false);
     let bandwidth = bytesize::to_string((bytes_written * 8) as u64 / interval, false);
     if let Some(retrans) = retransmits {
@@ -43,19 +56,24 @@ fn print_status(bytes_written: usize, interval: u64, id: usize, retransmits: Opt
     }
 }
 
-fn print_summary(bytes_written: usize, time: u64, retransmits: Option<u32>) {
-    let transfer = bytesize::to_string(bytes_written as u64, false);
-    let bandwidth = bytesize::to_string((bytes_written * 8) as u64 / time, false);
+// fn print_summary(bytes_written: usize, time: u64, retransmits: Option<u32>) {
+fn print_summary(json: bool, summary: Summary) {
+    if json {
+        println!("{}", serde_json::to_string(&summary).unwrap());
+        return;
+    }
+    let transfer = bytesize::to_string(summary.bytes_written as u64, false);
+    let bandwidth = bytesize::to_string((summary.bytes_written * 8) as u64 / summary.time, false);
 
     println!("-------");
-    if let Some(retrans) = retransmits {
+    if let Some(retrans) = summary.retransmits {
         println!(
             "[SUM] transfer= {} bandwidth= {}it/sec retransmits= {}\n",
             transfer, bandwidth, retrans
         );
     } else {
         println!(
-            "[*] transfer= {} bandwidth= {}it/sec\n",
+            "[SUM] transfer= {} bandwidth= {}it/sec\n",
             transfer, bandwidth
         );
     }
@@ -67,8 +85,8 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
 
     match &mut addr {
         SocketAddr::V6(addr6) => {
-            if let Some(bind_dev) = &opts.interface {
-                let if_name = CString::new(bind_dev.as_str()).unwrap();
+            if let Some(interface) = &opts.interface {
+                let if_name = CString::new(interface.as_str()).unwrap();
                 let if_index = unsafe { libc::if_nametoindex(if_name.as_ptr() as _) };
                 addr6.set_scope_id(if_index);
             }
@@ -80,19 +98,15 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
     let mut control_stream = TcpStream::connect(addr).unwrap();
 
     // send client hello to control stream;
-    let client_hello = ClientHello {
-        time: opts.time,
-        reversed: opts.reversed,
-        mss: opts.mss,
-        buffer_size: opts.buffer_size,
-    };
+    let client_hello = ClientHello::from(&opts);
+
     let control = ControlMessage::ClientHello(client_hello.clone());
     control_stream.write(&bincode::serialize(&control)?)?;
 
     let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
     match control {
         ControlMessage::ServerHello(server_hello) => {
-            println!(
+            eprintln!(
                 "received server hello: data_port= {}",
                 server_hello.data_port
             );
@@ -131,12 +145,12 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
 
     let listener = TcpListener::bind(addr)?;
 
-    println!("Server listening on {}:{}", addr.ip(), addr.port());
+    eprintln!("Server listening on {}:{}", addr.ip(), addr.port());
 
     loop {
         let (mut control_stream, client_addr) = listener.accept()?;
 
-        println!("new connection from: {:?}", client_addr);
+        eprintln!("new connection from: {:?}", client_addr);
 
         let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
 
@@ -144,7 +158,7 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
             ControlMessage::ClientHello(hello) => hello,
             _ => return Err(Error::Protocol("unexpected control message")),
         };
-        println!(
+        eprintln!(
             "received client configuration= {}",
             serde_json::to_string(&client_hello).unwrap()
         );
@@ -180,47 +194,91 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
     Ok(())
 }
 
-/// use the given socket as the sender
-/// only write to the socket
+/// Use the given socket as the sender
+/// this function will only write to the socket
+/// The client_hello will contain all the necessary information on how to write exactly
+/// eg. zerocopy and time
 fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
 where
     S: Write + std::os::unix::io::AsRawFd,
 {
-    let start = Instant::now();
-    let mut before = 0;
-    let mut total_retransmits = 0;
+    // create a new temporary file that holds random data
+    // if zerocopy is enabled this file will be sent to the receiver with sendfile()
+    // otherwise it will be read into a buffer and sent via read()
+    let mut buf_fd = create_temp_file(TCP_BLOCKSIZE)?;
+    let mut buf = vec![0; TCP_BLOCKSIZE];
+    if !client_hello.zerocopy {
+        buf_fd.read(&mut buf)?;
+    }
 
-    let mut buf = vec![0; client_hello.buffer_size];
-    util::fill_random(&mut buf);
+    // written contains the total bytes written in each interval
     let mut written: Vec<usize> = vec![0; client_hello.time as usize];
 
-    loop {
-        let elapsed = start.elapsed().as_secs();
-        let segment = elapsed as usize;
+    // Save starting time to determine how long to run the sending for
+    let mut last_interval = 0;
+    let mut total_retransmits = 0;
+    let start = Instant::now();
 
-        if before != segment {
+    loop {
+        // save the elapsed time since the start in a variable since this value could change by the
+        // time the check runs if the loop should finish
+        let elapsed = start.elapsed().as_secs();
+        let current_interval = elapsed as usize;
+
+        if last_interval != current_interval {
+            // read the tcp_info socket option. This contains information about the current
+            // TcpStream, specifically the total retransmits that happened for this stream.
             let tcp_info: bindings::tcp_info =
                 unsafe { util::getsockopt(stream.as_raw_fd(), libc::IPPROTO_TCP, libc::TCP_INFO)? };
 
+            // calculate the retransmits for the current interval by taking the difference of the
+            // total retransmits and the retransmits at the last check
             let current_retransmits = tcp_info.tcpi_total_retrans - total_retransmits;
             total_retransmits = tcp_info.tcpi_total_retrans;
 
-            print_status(written[segment - 1], 1, segment, Some(current_retransmits));
-            before = segment;
+            print_status(
+                client_hello.json,
+                written[current_interval - 1],
+                1,
+                current_interval,
+                Some(current_retransmits),
+            );
+            last_interval = current_interval;
         }
 
-        if start.elapsed().as_secs() >= client_hello.time {
+        // break out of the loop if the user provided time has elapsed
+        if elapsed >= client_hello.time {
             break;
         }
 
-        let n = stream.write(&mut buf).unwrap();
-        *written.get_mut(segment).unwrap() += n;
+        let n = if client_hello.zerocopy {
+            // if the client selected the zerocopy option use sendfile() to send the previously
+            // created buffer file to the receiver.
+            // This is much more efficient because we reduce the amount of syscalls and cpu cycles
+            let res =
+                unsafe { util::sendfile(stream.as_raw_fd(), buf_fd.as_raw_fd(), TCP_BLOCKSIZE)? };
+
+            // rewind the cursor to start reading at the beginning of the file in the next
+            // iteration of the loop
+            buf_fd.rewind()?;
+
+            res
+        } else {
+            // simply write the buffer to the stream
+            stream.write(&mut buf)?
+        };
+
+        // update total bytes written for the current interval
+        *written.get_mut(current_interval).unwrap() += n;
     }
 
     print_summary(
-        written.iter().sum(),
-        start.elapsed().as_secs(),
-        Some(total_retransmits),
+        client_hello.json,
+        Summary {
+            bytes_written: written.iter().sum(),
+            time: start.elapsed().as_secs(),
+            retransmits: Some(total_retransmits),
+        },
     );
     Ok(())
 }
@@ -231,16 +289,17 @@ fn receiver<S>(socket: &mut S, client_hello: ClientHello) -> Result<(), io::Erro
 where
     S: Read,
 {
-    let start = Instant::now();
-    let mut before = 0;
-
+    // create a receive buffer
     let mut buf = vec![0; client_hello.buffer_size];
     let mut written: Vec<usize> = vec![0; client_hello.time as usize];
+
+    let start = Instant::now();
+    let mut before = 0;
 
     loop {
         let segment = start.elapsed().as_secs() as usize;
         if before != segment {
-            print_status(written[segment - 1], 1, segment, None);
+            print_status(client_hello.json, written[segment - 1], 1, segment, None);
             before = segment;
         }
 
@@ -252,16 +311,25 @@ where
         }
     }
 
-    print_summary(written.iter().sum(), start.elapsed().as_secs(), None);
+    print_summary(
+        client_hello.json,
+        Summary {
+            bytes_written: written.iter().sum(),
+            time: start.elapsed().as_secs(),
+            retransmits: None,
+        },
+    );
     Ok(())
 }
 
 unsafe fn create_raw_socket(addr: SocketAddr, opts: &ClientHello) -> Result<i32, io::Error> {
+    // determine socket family
     let fam = match addr {
         SocketAddr::V4(_) => libc::AF_INET,
         SocketAddr::V6(_) => libc::AF_INET6,
     };
 
+    // create a raw socket
     let fd = wrap_io_err(libc::socket(fam, libc::SOCK_STREAM, 0))?;
 
     // set the maximum segment size for this socket
@@ -310,7 +378,7 @@ fn create_server_socket(addr: SocketAddr, opts: &ClientHello) -> Result<TcpListe
 /// shamelessly stolen from the rust private std lib
 /// (they could have just made the module public)
 ///
-/// SAFETY: addr has to live longe than the function!!
+/// SAFETY: addr has to outlive the function so this has to be a &SocketAddr
 unsafe fn addr_into_inner(addr: &SocketAddr) -> (*const libc::sockaddr, libc::socklen_t) {
     match addr {
         SocketAddr::V4(ref a) => (
@@ -322,4 +390,19 @@ unsafe fn addr_into_inner(addr: &SocketAddr) -> (*const libc::sockaddr, libc::so
             mem::size_of_val(a) as libc::socklen_t,
         ),
     }
+}
+
+fn create_temp_file(blksize: usize) -> io::Result<File> {
+    let template = std::env::temp_dir().join("iperf.XXXXXX");
+    let template = CString::new(template.to_str().unwrap()).unwrap();
+    let fd = wrap_io_err(unsafe { libc::mkstemp(template.as_ptr() as _) }).unwrap();
+    let mut outfile = unsafe { File::from_raw_fd(fd) };
+
+    let mut rand = File::open("/dev/urandom").unwrap();
+    let mut buf = vec![0; blksize];
+    rand.read(&mut buf)?;
+    outfile.write(&buf)?;
+    outfile.rewind().unwrap();
+
+    Ok(outfile)
 }

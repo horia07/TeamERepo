@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{convert::From, net::IpAddr};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -17,7 +17,7 @@ pub struct ServerOpts {
     pub bind: IpAddr,
 
     /// accept only a single client
-    #[structopt(short, long)]
+    #[structopt(short = "1", long)]
     pub single: bool,
 
     /// network interface to bind to (eg. eth0)
@@ -58,6 +58,9 @@ pub struct ClientOpts {
     /// Tcp buffer size
     #[structopt(long, default_value = "32768")]
     pub buffer_size: usize,
+
+    #[structopt(short = "Z", long)]
+    pub zerocopy: bool,
 }
 
 #[derive(Debug, StructOpt)]
@@ -75,6 +78,8 @@ pub struct ClientHello {
     pub mss: Option<i32>,
     pub reversed: bool,
     pub buffer_size: usize,
+    pub zerocopy: bool,
+    pub json: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -86,4 +91,24 @@ pub struct ServerHello {
 pub enum ControlMessage {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
+}
+
+#[derive(Debug, Serialize)]
+pub struct Summary {
+    pub bytes_written: usize,
+    pub time: u64,
+    pub retransmits: Option<u32>,
+}
+
+impl From<&ClientOpts> for ClientHello {
+    fn from(opts: &ClientOpts) -> Self {
+        ClientHello {
+            time: opts.time,
+            mss: opts.mss,
+            reversed: opts.reversed,
+            buffer_size: opts.buffer_size,
+            zerocopy: opts.zerocopy,
+            json: opts.json,
+        }
+    }
 }

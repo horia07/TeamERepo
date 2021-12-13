@@ -1,4 +1,4 @@
-use std::{io, mem};
+use std::{io, mem, os::unix::io::AsRawFd};
 
 pub fn fill_random(buf: &mut [u8]) {
     unsafe {
@@ -37,5 +37,20 @@ pub fn wrap_io_err(res: i32) -> Result<i32, io::Error> {
     match res {
         -1 => return Err(io::Error::last_os_error()),
         _ => Ok(res),
+    }
+}
+
+pub unsafe fn sendfile<I, O>(out_fd: O, in_fd: I, count: usize) -> io::Result<usize>
+where
+    I: AsRawFd,
+    O: AsRawFd,
+{
+    let offset: libc::off_t = 0;
+
+    let res = libc::sendfile(out_fd.as_raw_fd(), in_fd.as_raw_fd(), offset as _, count);
+
+    match res {
+        -1 => Err(io::Error::last_os_error()),
+        n => Ok(n as usize),
     }
 }
