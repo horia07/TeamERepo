@@ -18,7 +18,10 @@ def gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy):
     ax2.set_title("swiss-iperf")#
     ax2.legend()
 
-    fig.savefig("result/plot_{}.png".format(timestr))
+    filename = "/data/plot_{}.png".format(timestr)
+    print("generated plot:", filename)
+    fig.savefig(filename)
+    fig.savefig("/data/plot_latest.png")
 
 
 if __name__ == "__main__":
@@ -31,7 +34,7 @@ if __name__ == "__main__":
     y_swiss_basic = list(map(float, sys.stdin.readline().strip().split(" ")))
     y_swiss_zerocopy = list(map(float, sys.stdin.readline().strip().split(" ")))
 
-    print(xs, y_basic, y_swiss_zerocopy)
+    # print(xs, y_basic, y_swiss_zerocopy)
 
     gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy)
 

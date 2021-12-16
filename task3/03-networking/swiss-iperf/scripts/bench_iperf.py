@@ -3,7 +3,6 @@ import json
 import argparse
 import os
 from datetime import datetime
-from gen_plot import gen_plot
 
 def run_swiss_client(host, time, interface=None, window_size=None, zerocopy=False, mss=None):
 
@@ -106,15 +105,18 @@ def main():
     dto = datetime.now()
     timestr = dto.strftime("%Y-%m-%d-%H-%M-%S")
 
-    with open(f"result/data_{timestr}.txt", "w") as f:
-        f.write(" ".join(map(str, xs)) + "\n")
-        f.write(" ".join(map(str, y_basic)) + "\n")
-        f.write(" ".join(map(str, y_zerocopy)) + "\n")
-        f.write(" ".join(map(str, y_swiss_basic)) + "\n")
-        f.write(" ".join(map(str, y_swiss_zerocopy)) + "\n")
+    for filename in ["data_latest", f"data_{timestr}"]:
 
+        filename = f"result/{filename}.txt"
+        print("generated data:", filename)
+        with open(filename, "w") as f:
+            f.write(" ".join(map(str, xs)) + "\n")
+            f.write(" ".join(map(str, y_basic)) + "\n")
+            f.write(" ".join(map(str, y_zerocopy)) + "\n")
+            f.write(" ".join(map(str, y_swiss_basic)) + "\n")
+            f.write(" ".join(map(str, y_swiss_zerocopy)) + "\n")
 
-    gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy)
+    # gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy)
 
 
 if __name__ == "__main__":
