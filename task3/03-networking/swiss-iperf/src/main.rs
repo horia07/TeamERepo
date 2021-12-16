@@ -62,24 +62,29 @@ fn print_summary(json: bool, summary: Summary) {
         println!("{}", serde_json::to_string(&summary).unwrap());
         return;
     }
+
+    if summary.time == 0 {
+        println!("No summary available");
+        return;
+    };
     let transfer = bytesize::to_string(summary.bytes_written as u64, false);
     let bandwidth = bytesize::to_string((summary.bytes_written * 8) as u64 / summary.time, false);
 
     println!("-------");
     if let Some(retrans) = summary.retransmits {
         println!(
-            "[SUM] transfer= {} bandwidth= {}it/sec retransmits= {}\n",
-            transfer, bandwidth, retrans
+            "[SUM] time= {} transfer= {} bandwidth= {}it/sec retransmits= {}\n",
+            summary.time, transfer, bandwidth, retrans
         );
     } else {
         println!(
-            "[SUM] transfer= {} bandwidth= {}it/sec\n",
-            transfer, bandwidth
+            "[SUM] time= {} transfer= {} bandwidth= {}it/sec\n",
+            summary.time, transfer, bandwidth
         );
     }
 }
 
-/// startup the server
+/// startup the client
 fn client(opts: ClientOpts) -> Result<(), Error> {
     let mut addr = SocketAddr::new(opts.host, opts.port);
 
@@ -134,8 +139,8 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
 
     match &mut addr {
         SocketAddr::V6(addr6) => {
-            if let Some(bind_dev) = opts.bind_dev {
-                let if_name = CString::new(bind_dev).unwrap();
+            if let Some(bind_dev) = &opts.bind_dev {
+                let if_name = CString::new(bind_dev.as_str()).unwrap();
                 let if_index = unsafe { libc::if_nametoindex(if_name.as_ptr() as _) };
                 addr6.set_scope_id(if_index);
             }
@@ -148,43 +153,11 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
     eprintln!("Server listening on {}:{}", addr.ip(), addr.port());
 
     loop {
-        let (mut control_stream, client_addr) = listener.accept()?;
+        let (control_stream, client_addr) = listener.accept()?;
 
-        eprintln!("new connection from: {:?}", client_addr);
-
-        let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
-
-        let client_hello = match control {
-            ControlMessage::ClientHello(hello) => hello,
-            _ => return Err(Error::Protocol("unexpected control message")),
-        };
-        eprintln!(
-            "received client configuration= {}",
-            serde_json::to_string(&client_hello).unwrap()
-        );
-
-        // create data stream with random port
-        let data_addr = {
-            let mut tmp = addr.clone();
-            tmp.set_port(opts.data_port);
-            tmp
-        };
-        let data_socket = create_server_socket(data_addr, &client_hello)?;
-
-        // send server hello containing socket address of data socket message to client
-        let server_hello = ServerHello {
-            data_port: data_socket.local_addr()?.port(),
-        };
-        let control = ControlMessage::ServerHello(server_hello);
-        control_stream.write(&bincode::serialize(&control)?)?;
-
-        let (mut data_stream, _client_addr) = data_socket.accept()?;
-        // TODO: maybe check if client address is the same as before
-
-        if client_hello.reversed {
-            sender(&mut data_stream, client_hello)?;
-        } else {
-            receiver(&mut data_stream, client_hello)?;
+        match handle_client(control_stream, client_addr, addr, &opts) {
+            Err(e) => eprintln!("Error handling client: {:?}", e),
+            _ => {}
         }
 
         if opts.single {
@@ -194,11 +167,55 @@ fn server(opts: ServerOpts) -> Result<(), Error> {
     Ok(())
 }
 
+fn handle_client(
+    mut control_stream: TcpStream,
+    client_addr: SocketAddr,
+    server_addr: SocketAddr,
+    opts: &ServerOpts,
+) -> Result<(), Error> {
+    eprintln!("new connection from: {:?}", client_addr);
+
+    let control: ControlMessage = bincode::deserialize_from(&mut control_stream).unwrap();
+
+    let client_hello = match control {
+        ControlMessage::ClientHello(hello) => hello,
+        _ => return Err(Error::Protocol("unexpected control message")),
+    };
+    eprintln!(
+        "received client configuration= {}",
+        serde_json::to_string(&client_hello).unwrap()
+    );
+
+    // create data stream with random port
+    let data_addr = {
+        let mut tmp = server_addr.clone();
+        tmp.set_port(opts.data_port);
+        tmp
+    };
+    let data_socket = create_server_socket(data_addr, &client_hello)?;
+
+    // send server hello containing socket address of data socket message to client
+    let server_hello = ServerHello {
+        data_port: data_socket.local_addr()?.port(),
+    };
+    let control = ControlMessage::ServerHello(server_hello);
+    control_stream.write(&bincode::serialize(&control)?)?;
+
+    let (mut data_stream, _client_addr) = data_socket.accept()?;
+    // TODO: maybe check if client address is the same as before
+
+    if client_hello.reversed {
+        sender(&mut data_stream, client_hello)
+    } else {
+        receiver(&mut data_stream, client_hello)
+    }
+}
+
 /// Use the given socket as the sender
 /// this function will only write to the socket
 /// The client_hello will contain all the necessary information on how to write exactly
 /// eg. zerocopy and time
-fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
+fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), Error>
 where
     S: Write + std::os::unix::io::AsRawFd,
 {
@@ -285,7 +302,7 @@ where
 
 /// use the given socket as the receiver
 /// only read from the socket
-fn receiver<S>(socket: &mut S, client_hello: ClientHello) -> Result<(), io::Error>
+fn receiver<S>(socket: &mut S, client_hello: ClientHello) -> Result<(), Error>
 where
     S: Read,
 {
@@ -297,16 +314,22 @@ where
     let mut before = 0;
 
     loop {
-        let segment = start.elapsed().as_secs() as usize;
-        if before != segment {
-            print_status(client_hello.json, written[segment - 1], 1, segment, None);
-            before = segment;
+        let current_interval = start.elapsed().as_secs() as usize;
+        if before != current_interval {
+            print_status(
+                client_hello.json,
+                written[current_interval - 1],
+                1,
+                current_interval,
+                None,
+            );
+            before = current_interval;
         }
 
         match socket.read(&mut buf)? {
             0 => break,
             n => {
-                written.get_mut(segment).map(|w| *w += n);
+                written.get_mut(current_interval).map(|w| *w += n);
             }
         }
     }

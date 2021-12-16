@@ -2,3 +2,4 @@ target
 perf.data*
 flamegraph.svg
 bin
+result

@@ -1,11 +1,5 @@
 use std::{io, mem, os::unix::io::AsRawFd};
 
-pub fn fill_random(buf: &mut [u8]) {
-    unsafe {
-        libc::getrandom(buf.as_mut_ptr() as _, buf.len(), 0);
-    }
-}
-
 pub unsafe fn setsockopt<T>(fd: i32, level: libc::c_int, opt: libc::c_int, val: T) -> i32 {
     let val = &val as *const T as *const libc::c_void;
     let res = libc::setsockopt(
