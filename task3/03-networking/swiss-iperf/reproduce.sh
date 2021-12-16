@@ -1,6 +1,3 @@
-echo build swiss-iperf binaries
-bash ./build.sh
-
 echo build plot container
 docker build -t teame/matplotlib -f Dockerfile.plot .
 
