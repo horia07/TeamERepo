@@ -23,6 +23,10 @@ pub struct ServerOpts {
     /// network interface to bind to (eg. eth0)
     #[structopt(long)]
     pub bind_dev: Option<String>,
+
+    /// Print output as JSON
+    #[structopt(short, long)]
+    pub json: bool,
 }
 
 #[derive(Debug, StructOpt)]
@@ -55,9 +59,9 @@ pub struct ClientOpts {
     #[structopt(short = "M", long)]
     pub mss: Option<i32>,
 
-    /// Tcp buffer size
-    #[structopt(long, default_value = "32768")]
-    pub buffer_size: usize,
+    /// Tcp send and receive buffer size
+    #[structopt(short = "W", long)]
+    pub window: Option<usize>,
 
     #[structopt(short = "Z", long)]
     pub zerocopy: bool,
@@ -77,7 +81,7 @@ pub struct ClientHello {
     pub time: u64,
     pub mss: Option<i32>,
     pub reversed: bool,
-    pub buffer_size: usize,
+    pub window: Option<usize>,
     pub zerocopy: bool,
     pub json: bool,
 }
@@ -106,7 +110,7 @@ impl From<&ClientOpts> for ClientHello {
             time: opts.time,
             mss: opts.mss,
             reversed: opts.reversed,
-            buffer_size: opts.buffer_size,
+            window: opts.window,
             zerocopy: opts.zerocopy,
             json: opts.json,
         }

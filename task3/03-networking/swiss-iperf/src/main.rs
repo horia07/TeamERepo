@@ -307,7 +307,7 @@ where
     S: Read,
 {
     // create a receive buffer
-    let mut buf = vec![0; client_hello.buffer_size];
+    let mut buf = vec![0; TCP_BLOCKSIZE];
     let mut written: Vec<usize> = vec![0; client_hello.time as usize];
 
     let start = Instant::now();
@@ -362,6 +362,22 @@ unsafe fn create_raw_socket(addr: SocketAddr, opts: &ClientHello) -> Result<i32,
             libc::IPPROTO_TCP,
             libc::TCP_MAXSEG,
             mss,
+        ))?;
+    }
+
+    // set the window size
+    if let Some(window) = opts.window {
+        wrap_io_err(util::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            window,
+        ))?;
+        wrap_io_err(util::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            window,
         ))?;
     }
 

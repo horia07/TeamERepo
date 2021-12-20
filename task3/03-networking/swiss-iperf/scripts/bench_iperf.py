@@ -9,7 +9,7 @@ def run_swiss_client(host, time, interface=None, window_size=None, zerocopy=Fals
     client_cmd = f"bin/swiss-iperf client {host} --time {time} --json"
 
     if window_size:
-        client_cmd += f" --buffer-size {window_size}"
+        client_cmd += f" -W {window_size}"
 
     if zerocopy:
         client_cmd += " -Z"
