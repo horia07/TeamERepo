@@ -9,13 +9,13 @@ def run_swiss_client(host, time, interface=None, window_size=None, zerocopy=Fals
     client_cmd = f"bin/swiss-iperf client {host} --time {time} --json"
 
     if window_size:
-        client_cmd += f" -W {window_size}"
+        client_cmd += f" -w {window_size}"
 
     if zerocopy:
         client_cmd += " -Z"
 
     if mss:
-        client_cmd += f" --mss {mss}"
+        client_cmd += f" -M {mss}"
 
     if interface:
         client_cmd += f" --interface {interface}"
@@ -49,7 +49,7 @@ def run_iperf_client(host, time, interface=None, window_size=None, zerocopy=Fals
         client_cmd += " -Z"
 
     if mss:
-        client_cmd += f" --mss {mss}"
+        client_cmd += f" -M {mss}"
 
 
     print("cmd=", client_cmd)
@@ -78,7 +78,6 @@ def main():
     time = args.time
 
     os.makedirs("result", exist_ok=True)
-    out_file = open("result/iperf.out", "w")
 
     xs = [] 
     y_basic, y_zerocopy, y_mss = [], [], []

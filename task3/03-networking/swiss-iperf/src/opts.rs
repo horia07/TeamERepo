@@ -3,6 +3,17 @@ use std::{convert::From, net::IpAddr};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
+pub struct CommonOpts {
+    /// server port of control channel
+    #[structopt(short, long, default_value = "5202")]
+    pub port: u16,
+
+    /// Print output as JSON
+    #[structopt(short, long)]
+    pub json: bool,
+}
+
+#[derive(Debug, StructOpt)]
 pub struct ServerOpts {
     /// server port of control channel
     #[structopt(short, long, default_value = "5202")]
@@ -27,27 +38,22 @@ pub struct ServerOpts {
     /// Print output as JSON
     #[structopt(short, long)]
     pub json: bool,
+
+    #[structopt(flatten)]
+    pub common_opts: CommonOpts,
 }
 
 #[derive(Debug, StructOpt)]
 pub struct ClientOpts {
-    /// Print output as JSON
-    #[structopt(short, long)]
-    pub json: bool,
-
     /// Host to connect to
     pub host: IpAddr,
-
-    /// Server port
-    #[structopt(short, long, default_value = "5202")]
-    pub port: u16,
 
     /// Server sends data to client
     #[structopt(short = "R", long)]
     pub reversed: bool,
 
     /// Time to run the benchmark (in seconds)
-    #[structopt(short, long)]
+    #[structopt(short, long, default_value = "10")]
     pub time: u64,
 
     /// Network interface to bind to (eg. eth0)
@@ -56,15 +62,19 @@ pub struct ClientOpts {
     pub interface: Option<String>,
 
     /// Maximum segment size
-    #[structopt(short = "M", long)]
+    #[structopt(short = "M", long = "set-mss")]
     pub mss: Option<i32>,
 
     /// Tcp send and receive buffer size
-    #[structopt(short = "W", long)]
+    #[structopt(short = "w", long)]
     pub window: Option<usize>,
 
+    /// Use a zerocopy way of sending data
     #[structopt(short = "Z", long)]
     pub zerocopy: bool,
+
+    #[structopt(flatten)]
+    pub common_opts: CommonOpts,
 }
 
 #[derive(Debug, StructOpt)]
@@ -83,7 +93,6 @@ pub struct ClientHello {
     pub reversed: bool,
     pub window: Option<usize>,
     pub zerocopy: bool,
-    pub json: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -112,7 +121,6 @@ impl From<&ClientOpts> for ClientHello {
             reversed: opts.reversed,
             window: opts.window,
             zerocopy: opts.zerocopy,
-            json: opts.json,
         }
     }
 }

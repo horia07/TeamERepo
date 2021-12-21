@@ -86,7 +86,7 @@ fn print_summary(json: bool, summary: Summary) {
 
 /// startup the client
 fn client(opts: ClientOpts) -> Result<(), Error> {
-    let mut addr = SocketAddr::new(opts.host, opts.port);
+    let mut addr = SocketAddr::new(opts.host, opts.common_opts.port);
 
     match &mut addr {
         SocketAddr::V6(addr6) => {
@@ -122,9 +122,9 @@ fn client(opts: ClientOpts) -> Result<(), Error> {
             };
             let mut data_stream = create_client_socket(data_addr, &client_hello)?;
             if opts.reversed {
-                receiver(&mut data_stream, client_hello)?;
+                receiver(&mut data_stream, client_hello, &opts.common_opts)?;
             } else {
-                sender(&mut data_stream, client_hello)?;
+                sender(&mut data_stream, client_hello, &opts.common_opts)?;
             }
         }
         _ => return Err(Error::Protocol("unexpected control message")),
@@ -205,9 +205,9 @@ fn handle_client(
     // TODO: maybe check if client address is the same as before
 
     if client_hello.reversed {
-        sender(&mut data_stream, client_hello)
+        sender(&mut data_stream, client_hello, &opts.common_opts)
     } else {
-        receiver(&mut data_stream, client_hello)
+        receiver(&mut data_stream, client_hello, &opts.common_opts)
     }
 }
 
@@ -215,7 +215,11 @@ fn handle_client(
 /// this function will only write to the socket
 /// The client_hello will contain all the necessary information on how to write exactly
 /// eg. zerocopy and time
-fn sender<S>(stream: &mut S, client_hello: ClientHello) -> Result<(), Error>
+fn sender<S>(
+    stream: &mut S,
+    client_hello: ClientHello,
+    common_opts: &CommonOpts,
+) -> Result<(), Error>
 where
     S: Write + std::os::unix::io::AsRawFd,
 {
@@ -254,7 +258,7 @@ where
             total_retransmits = tcp_info.tcpi_total_retrans;
 
             print_status(
-                client_hello.json,
+                common_opts.json,
                 written[current_interval - 1],
                 1,
                 current_interval,
@@ -290,7 +294,7 @@ where
     }
 
     print_summary(
-        client_hello.json,
+        common_opts.json,
         Summary {
             bytes_written: written.iter().sum(),
             time: start.elapsed().as_secs(),
@@ -302,7 +306,11 @@ where
 
 /// use the given socket as the receiver
 /// only read from the socket
-fn receiver<S>(socket: &mut S, client_hello: ClientHello) -> Result<(), Error>
+fn receiver<S>(
+    socket: &mut S,
+    client_hello: ClientHello,
+    common_opts: &CommonOpts,
+) -> Result<(), Error>
 where
     S: Read,
 {
@@ -317,7 +325,7 @@ where
         let current_interval = start.elapsed().as_secs() as usize;
         if before != current_interval {
             print_status(
-                client_hello.json,
+                common_opts.json,
                 written[current_interval - 1],
                 1,
                 current_interval,
@@ -335,7 +343,7 @@ where
     }
 
     print_summary(
-        client_hello.json,
+        common_opts.json,
         Summary {
             bytes_written: written.iter().sum(),
             time: start.elapsed().as_secs(),
