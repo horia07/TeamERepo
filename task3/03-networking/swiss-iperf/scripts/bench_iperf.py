@@ -76,6 +76,7 @@ def main():
 
     host = args.host
     time = args.time
+    interface = args.interface
 
     os.makedirs("result", exist_ok=True)
 
@@ -87,11 +88,11 @@ def main():
         x = 2**i 
         window_size = x * 1024
 
-        bps_iperf_basic = run_iperf_client(host, time, window_size=window_size)
-        bps_iperf_zerocopy = run_iperf_client(host, time, window_size=window_size, zerocopy=True)
+        bps_iperf_basic = run_iperf_client(host, time, interface=interface, window_size=window_size)
+        bps_iperf_zerocopy = run_iperf_client(host, time, interface=interface, window_size=window_size, zerocopy=True)
 
-        bps_swiss_basic = run_swiss_client(host, time, window_size=window_size)
-        bps_swiss_zerocopy = run_swiss_client(host, time, window_size=window_size, zerocopy=True)
+        bps_swiss_basic = run_swiss_client(host, time, interface=interface, window_size=window_size)
+        bps_swiss_zerocopy = run_swiss_client(host, time, interface=interface, window_size=window_size, zerocopy=True)
 
         xs.append(x)
 
