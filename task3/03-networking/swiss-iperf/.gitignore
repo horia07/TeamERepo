@@ -3,3 +3,5 @@ perf.data*
 flamegraph.svg
 bin
 result
+
+__pycache__

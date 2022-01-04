@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import sys
 from datetime import datetime
 
-def gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy):
+def gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy, xs_mss, y_mss, y_swiss_mss):
     fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True, sharey=True)
 
     ax1.plot(xs, y_basic, "o-", label="basic")
@@ -18,11 +18,20 @@ def gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy):
     ax2.set_title("swiss-iperf")#
     ax2.legend()
 
-    filename = "/data/plot_{}.png".format(timestr)
+    filename = "/data/plot_window_{}.png".format(timestr)
     print("generated plot:", filename)
     fig.savefig(filename)
-    fig.savefig("/data/plot_latest.png")
+    fig.savefig("/data/plot_window_latest.png")
 
+    plt.clf()
+
+    plt.plot(xs_mss, y_mss, "o-", label="iperf3")
+    plt.plot(xs_mss, y_swiss_mss, "s-", label="swiss-iperf")
+
+    filename = "/data/plot_mss_{}.png".format(timestr)
+    print("generated plot:", filename)
+    plt.savefig(filename)
+    plt.savefig("/data/plot_mss_latest.png")
 
 if __name__ == "__main__":
     dto = datetime.now()
@@ -33,8 +42,11 @@ if __name__ == "__main__":
     y_zerocopy = list(map(float, sys.stdin.readline().strip().split(" ")))
     y_swiss_basic = list(map(float, sys.stdin.readline().strip().split(" ")))
     y_swiss_zerocopy = list(map(float, sys.stdin.readline().strip().split(" ")))
+    xs_mss = list(map(float, sys.stdin.readline().strip().split(" ")))
+    y_mss = list(map(float, sys.stdin.readline().strip().split(" ")))
+    y_swiss_mss = list(map(float, sys.stdin.readline().strip().split(" ")))
 
     # print(xs, y_basic, y_swiss_zerocopy)
 
-    gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy)
+    gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy, xs_mss, y_mss, y_swiss_mss)
 
