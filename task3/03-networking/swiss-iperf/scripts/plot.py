@@ -29,6 +29,7 @@ def gen_plot(timestr, xs, y_basic, y_zerocopy, y_swiss_basic, y_swiss_zerocopy, 
     plt.plot(xs_mss, y_swiss_mss, "s-", label="swiss-iperf")
     plt.xlabel("MSS (in Bytes)")
     plt.ylabel("Throughput (in Gbits/sec)")
+    plt.legend()
 
     filename = "/data/plot_mss_{}.png".format(timestr)
     print("generated plot:", filename)
