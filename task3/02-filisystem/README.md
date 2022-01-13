@@ -22,3 +22,5 @@ phoronix.pdf:		a resume of the Exploration Task results.
 
 Do NOT close the terminal before copying the link generated at the end on the console.
 Copy this link and access it in the browser for a better overview of the results. 
+
+**if you want to reproduce the experiments more than once, make sure the RESULTS folder is empty before each run**
