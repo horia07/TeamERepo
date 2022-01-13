@@ -14,5 +14,5 @@ and wait for the generation of the results.
 The results are stored in the plottinf/results folder. at the end of the run you should have:
 
 plotread.png            plot comparing read latency between the kv stores
-plotupdate.png           plot comparing update latency between the kv stores
+plotupdate.png          plot comparing update latency between the kv stores
 
