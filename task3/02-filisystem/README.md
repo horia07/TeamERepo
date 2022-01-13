@@ -1,6 +1,6 @@
 #reproduce
 
-To reproduce the experiments, you must be in the same directory with this file.
+To reproduce the experiments, you must be in the same directory with this file. Please create the empty folder "RESULTS" now if it doesn't exist already
 The run-time should be about 40 minutes for the Basic Task and the Exploration Task, which are executed together.
 
 Run the command:
