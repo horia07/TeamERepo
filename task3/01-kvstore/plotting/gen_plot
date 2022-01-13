@@ -1,0 +1,2 @@
+docker build -t plotgen -f Dockerfile .
+docker run --rm -it -v ${PWD}/results:/data plotgen
