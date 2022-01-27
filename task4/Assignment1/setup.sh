@@ -10,6 +10,6 @@ ln -s $PWD/DeadCodeElimination.cpp $PWD/llvm-project/llvm/lib/Transforms/Utils/D
 ln -s $PWD/DeadCodeElimination.h $PWD/llvm-project/llvm/include/llvm/Transforms/Utils/DeadCodeElimination.h -f
 ln -s $PWD/CMakeLists.txt $PWD/llvm-project/llvm/lib/Transforms/Utils/CMakeLists.txt -f
 ln -s $PWD/PassRegistry.def $PWD/llvm-project/llvm/lib/Passes/PassRegistry.def -f
-ln -s $PWD/PassBuilder.def $PWD/llvm-project/llvm/lib/Passes/PassBuilder.cpp -f
+ln -s $PWD/PassBuilder.cpp $PWD/llvm-project/llvm/lib/Passes/PassBuilder.cpp -f
 
 echo linked files
