@@ -18,63 +18,41 @@ PreservedAnalyses DeadCodeEliminationPass::run(Function &F,
                                                FunctionAnalysisManager &AM) {
   errs() << F.getName() << "\n";
 
-  std::unordered_set<std::string> dead_names;
-  int iteration = 0;
+  // accumulate all instructions that have to be removed
+  std::vector<Instruction *> to_remove;
 
   do {
-    // clear the names for the next round
-    dead_names.clear();
-
+    to_remove.clear();
     // iterate through all intstructions
     for (BasicBlock &bb : F) {
       for (Instruction &instr : bb) {
-
-        // iterate through all operands of the instructions
-        auto numOperands = instr.getNumOperands();
-        for (unsigned int i = 0; i < numOperands; i++) {
-          auto v = instr.getOperand(i);
-          auto id = v->getNameOrAsOperand();
-
-          // if the remove the operands from the dead_names set
-          // because they are alive
-          dead_names.erase(id);
-        }
-
         // terminators do not have results so skip them
         if (instr.isTerminator()) {
           continue;
         }
 
-        // skip if the instruction could have side effects (like store or a function call) 
+        // skip if the instruction could have side effects 
+        // (like store or a function call)
         if (instr.mayHaveSideEffects()) {
-            continue;
+          continue;
         }
 
-        std::string value_name = instr.getNameOrAsOperand();
-        // insert the result name as a potential dead name
-        dead_names.insert(value_name);
-      }
-    }
+        unsigned int uses = instr.getNumUses();
+        errs() << "uses: " << uses << "\t" << instr << "\n";
 
-    // accumulate all instructions that have to be removed
-    std::vector<Instruction *> to_remove;
-    for (BasicBlock &bb : F) {
-      for (Instruction &i_it : bb) {
-        auto name = i_it.getNameOrAsOperand();
-        if (dead_names.find(name) != dead_names.end()) {
-          errs() << "[" << iteration << "] erasing " << i_it << "\n";
-          to_remove.push_back(&i_it);
+        // if there are no uses for the value, add it to the remove list
+        if (uses == 0) {
+          std::string value_name = instr.getName().str();
+          to_remove.push_back(&instr);
         }
       }
     }
 
-    for (Instruction *i : to_remove) {
-      i->eraseFromParent();
+    // erase all instructions from the remove list
+    for (Instruction *instr : to_remove) {
+      instr->eraseFromParent();
     }
-
-    iteration += 1;
-  } while (
-      !dead_names.empty()); // repeat while until there are no dead instructions
+  } while (!to_remove.empty());
 
   return PreservedAnalyses::all();
 }
